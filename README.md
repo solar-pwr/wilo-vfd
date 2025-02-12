@@ -30,6 +30,17 @@ Open Source Firmware for Wilo EMHIL 505 EM water pump
 Pinouts of internal connections
 ===============================
 
+J200 serial port
+----------------
+- 1 GND
+- 2 RxD (from PC to MCU)
+- 3 TxD (from MCU to PC)
+- 4 +15V
+- this port is optically isolated and powered from an isolated supply (+15VA and GND2)
+- seems to work only up to 9600 baud (not verified)
+- this port is used for programming in boot mode;
+  J302 pin 7 must be connected to GND - non-isolated side !
+
 14pin IDC header
 ----------------
 - 1 +15v
