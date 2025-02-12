@@ -1,6 +1,32 @@
 # wilo-vfd
 Open Source Firmware for Wilo EMHIL 505 EM water pump
 
+## Menu parameters description
+
+- **ON pressure:** pressure at which the pump will start regardless of flow sensor input
+- **OFF pressure:** pressure at which the pump can stop if there is no flow for specified amount of time
+- **OFF delay:** time before stopping the pump when there is no flow and OFF pressure has been reached
+- **Autorun:** power-on autorun enable/disable
+- **Max frequency:** maximum output frequency in autorun mode
+- **Base frequency:** output frequency when pressure is equal to OFF pressure
+  (increases when pressure is lower, decreases when pressure is higher);
+  make sure this is set to a value that can achieve the OFF pressure with zero flow, otherwise the pump will never turn off
+- **Min frequency:** minimum steady output frequency in autorun mode
+- **Stop frequency:** below this frequency, PWM is turned off and output phases are shorted to the negative pole
+- **Manual frequency:** frequency preset for manual run mode
+- **Rated frequency:** rated frequency of the motor (like 50Hz or 60Hz), used for output V/f ratio calculation
+- **Rated voltage:** rated voltage of the motor (effective value, like 230V), used for output V/f ratio calculation;
+  HINT: you can decrease this to reduce the power consumption, in my case, 130V works pretty well
+- **Max current:** current from the DC rail; if this value is exceeded, permanent fault is set
+- **Undervoltage:** minimum voltage on the DC rail; if voltage drops below this value, temporary fault is set; automatically resets in 4 seconds
+- **Overvoltage:** maximum voltage on the DC rail; if voltage exceeds this value, temporary fault is set; automatically resets in 4 seconds
+- **Max temperature:** maximum temperature of the IGBT module; if temperature exceeds this value, temporary fault is set; automatically resets in 4 seconds
+- **Rotation dir.:** 0 = "original" rotation direction; 1 = the opposite
+- **External switch:** 0 = disabled; 1 = autorun when closed; 2 = autorun when open
+- **Ignore faults:** disable fault detection, except short-circuit fault from IGBT module
+- **LED intensity:** sets the PWM period for LED outputs; 1 = darkest (longest); 7 = brightest (shortest period)
+- **Modbus ID:** Modbus ID for reading the holding registers through serial port
+
 Pinouts of internal connections
 ===============================
 
