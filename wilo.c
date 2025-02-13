@@ -1,4 +1,3 @@
-//
 // Wilo EMHIL 505 EM - open source firmware
 // Jakub Strnad 2025
 //
@@ -10,6 +9,7 @@
 //
 // - use Renesas Flash Development Toolkit to write the flash in Boot Mode
 // - pin 7 of J301 must be shorted to GND to enable Boot Mode
+// - serial port is on the J200 connector and uses TTL levels
 //
 // WARNING: There is no way to revert back to the original firmware,
 // WARNING: I was not able to read the original firmware from the MCU.
@@ -22,11 +22,11 @@
 #include <machine.h>
 #include <mathf.h>
 
-#define TEMP_K 273.15
-#define TEMP_0 298.15
-#define TEMP_R0 100000.0
-#define TEMP_B 3950.0
-#define TEMP_RDIV 68000.0
+#define TEMP_K 273.15f
+#define TEMP_0 298.15f
+#define TEMP_R0 100000.0f
+#define TEMP_B 3950.0f
+#define TEMP_RDIV 68000.0f
 
 #define PWM_MAX 2000
 
@@ -37,6 +37,7 @@
 #define FAULT_OC 0x10
 #define FAULT_XTAL 0x20
 #define FAULT_TEMP 0x40
+#define FAULT_NO_FLOW 0x80
 
 enum keyEnum { KEY_NONE, KEY_RUN, KEY_AUTO, KEY_UP, KEY_DOWN, KEY_MENU, KEY_ENTER, KEY_INVALID };
 
@@ -97,6 +98,41 @@ const int8_t svpwmW[] = {
 	-118, -120, -121, -122, -122, -123, -124, -125, -125, -126, -126, -126, -127, -127, -127, -127
 };
 
+const uint16_t crcTable[] = {
+   0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
+   0xC601, 0x06C0, 0x0780, 0xC741, 0x0500, 0xC5C1, 0xC481, 0x0440,
+   0xCC01, 0x0CC0, 0x0D80, 0xCD41, 0x0F00, 0xCFC1, 0xCE81, 0x0E40,
+   0x0A00, 0xCAC1, 0xCB81, 0x0B40, 0xC901, 0x09C0, 0x0880, 0xC841,
+   0xD801, 0x18C0, 0x1980, 0xD941, 0x1B00, 0xDBC1, 0xDA81, 0x1A40,
+   0x1E00, 0xDEC1, 0xDF81, 0x1F40, 0xDD01, 0x1DC0, 0x1C80, 0xDC41,
+   0x1400, 0xD4C1, 0xD581, 0x1540, 0xD701, 0x17C0, 0x1680, 0xD641,
+   0xD201, 0x12C0, 0x1380, 0xD341, 0x1100, 0xD1C1, 0xD081, 0x1040,
+   0xF001, 0x30C0, 0x3180, 0xF141, 0x3300, 0xF3C1, 0xF281, 0x3240,
+   0x3600, 0xF6C1, 0xF781, 0x3740, 0xF501, 0x35C0, 0x3480, 0xF441,
+   0x3C00, 0xFCC1, 0xFD81, 0x3D40, 0xFF01, 0x3FC0, 0x3E80, 0xFE41,
+   0xFA01, 0x3AC0, 0x3B80, 0xFB41, 0x3900, 0xF9C1, 0xF881, 0x3840,
+   0x2800, 0xE8C1, 0xE981, 0x2940, 0xEB01, 0x2BC0, 0x2A80, 0xEA41,
+   0xEE01, 0x2EC0, 0x2F80, 0xEF41, 0x2D00, 0xEDC1, 0xEC81, 0x2C40,
+   0xE401, 0x24C0, 0x2580, 0xE541, 0x2700, 0xE7C1, 0xE681, 0x2640,
+   0x2200, 0xE2C1, 0xE381, 0x2340, 0xE101, 0x21C0, 0x2080, 0xE041,
+   0xA001, 0x60C0, 0x6180, 0xA141, 0x6300, 0xA3C1, 0xA281, 0x6240,
+   0x6600, 0xA6C1, 0xA781, 0x6740, 0xA501, 0x65C0, 0x6480, 0xA441,
+   0x6C00, 0xACC1, 0xAD81, 0x6D40, 0xAF01, 0x6FC0, 0x6E80, 0xAE41,
+   0xAA01, 0x6AC0, 0x6B80, 0xAB41, 0x6900, 0xA9C1, 0xA881, 0x6840,
+   0x7800, 0xB8C1, 0xB981, 0x7940, 0xBB01, 0x7BC0, 0x7A80, 0xBA41,
+   0xBE01, 0x7EC0, 0x7F80, 0xBF41, 0x7D00, 0xBDC1, 0xBC81, 0x7C40,
+   0xB401, 0x74C0, 0x7580, 0xB541, 0x7700, 0xB7C1, 0xB681, 0x7640,
+   0x7200, 0xB2C1, 0xB381, 0x7340, 0xB101, 0x71C0, 0x7080, 0xB041,
+   0x5000, 0x90C1, 0x9181, 0x5140, 0x9301, 0x53C0, 0x5280, 0x9241,
+   0x9601, 0x56C0, 0x5780, 0x9741, 0x5500, 0x95C1, 0x9481, 0x5440,
+   0x9C01, 0x5CC0, 0x5D80, 0x9D41, 0x5F00, 0x9FC1, 0x9E81, 0x5E40,
+   0x5A00, 0x9AC1, 0x9B81, 0x5B40, 0x9901, 0x59C0, 0x5880, 0x9841,
+   0x8801, 0x48C0, 0x4980, 0x8941, 0x4B00, 0x8BC1, 0x8A81, 0x4A40,
+   0x4E00, 0x8EC1, 0x8F81, 0x4F40, 0x8D01, 0x4DC0, 0x4C80, 0x8C41,
+   0x4400, 0x84C1, 0x8581, 0x4540, 0x8701, 0x47C0, 0x4680, 0x8641,
+   0x8201, 0x42C0, 0x4380, 0x8341, 0x4100, 0x81C1, 0x8081, 0x4040
+};
+
 // xtal clock
 uint16_t clockWait = 65535;
 uint16_t startTCWD, startTCSRWD;
@@ -109,7 +145,7 @@ struct sParamDef {
 	char name[17];
 	char unit[5];
 	int8_t f; // fractional digits
-	int16_t def, min, max;
+	uint16_t def, min, max;
 };
 
 #define N_PARAM (sizeof(paramDef)/sizeof(paramDef[0]))
@@ -120,23 +156,25 @@ const struct sParamDef paramDef[] = {
 /*  2 */	{ 0x0c, "OFF delay", "s", 0, 3, 0, 15 },
 /*  3 */	{ 0x0e, "Autorun", "", 0, 1, 0, 1 },
 /*  4 */	{ 0x10, "Max frequency", "Hz", 0, 50, 5, 62 },
-/*  5 */	{ 0x12, "Base frequency", "Hz", 0, 34, 5, 62 },
+/*  5 */	{ 0x12, "Base frequency", "Hz", 0, 36, 5, 62 },
 /*  6 */	{ 0x14, "Min frequency", "Hz", 0, 30, 5, 62 },
 /*  7 */	{ 0x16, "Stop frequency", "Hz", 0, 1, 1, 30 },
 /*  8 */	{ 0x18, "Manual frequency", "Hz", 0, 10, 1, 62 },
 /*  9 */	{ 0x1a, "Rated frequency", "Hz", 0, 50, 5, 62 },
 /* 10 */	{ 0x1c, "Rated voltage", "V", 0, 230, 10, 400 },
-/* 11 */	{ 0x1e, "Max current", "A", 1, 50, 5, 80 },
-/* 12 */	{ 0x26, "Undervoltage", "V", 0, 120, 50, 200 },
+/* 11 */	{ 0x1e, "Max current", "A", 1, 40, 5, 80 },
+/* 12 */	{ 0x26, "Undervoltage", "V", 0, 150, 50, 200 },
 /* 13 */	{ 0x28, "Overvoltage", "V", 0, 390, 200, 400 },
 /* 14 */	{ 0x2a, "Max temperature", "\001C", 0, 50, 25, 120 },
-/* 15 */	{ 0x24, "Rotation dir.", "", 0, 0, 0, 1 },
-/* 16 */	{ 0x20, "External switch", "", 0, 0, 0, 2 },
-/* 17 */	{ 0x22, "Ignore faults", "", 0, 0, 0, 1 },
-/* 18 */	{ 0x2c, "LED intensity", "", 0, 5, 1, 7 }
+/* 15 */	{ 0x30, "No flow timeout", "s", 0, 90, 2, 2000 },
+/* 16 */	{ 0x24, "Rotation dir.", "", 0, 0, 0, 1 },
+/* 17 */	{ 0x20, "External switch", "", 0, 0, 0, 2 },
+/* 18 */	{ 0x22, "Ignore faults", "", 0, 0, 0, 1 },
+/* 19 */	{ 0x2c, "LED intensity", "", 0, 5, 1, 6 },
+/* 20 */	{ 0x2e, "Modbus ID", "", 0, 45, 1, 247 }
 };
 
-int16_t param[N_PARAM];
+uint16_t param[N_PARAM];
 uint8_t autoRun, autoRunStart, extSwConfig, manualRun;
 uint8_t menu, menuItem, page;
 uint8_t ignFaults, rotDirParam;
@@ -154,7 +192,8 @@ char statusLine[4][20] = {
 };
 char menuLine[20] = "[######] >######";
 
-uint16_t tDisp;
+uint16_t tLcdSend, tDisp;
+uint8_t lcdRefresh, lcdPos, lcdProcRun;
 uint16_t dispFreq, dispVolt, dispCur, dispPres, dispTemp, dispPow;
 float tempR;
 uint8_t dispStep;
@@ -182,16 +221,19 @@ uint8_t pOvf;
 uint16_t tPres;
 uint16_t pRaw[3];
 int16_t pAct;
-int16_t pOn = 625; // 2.5bar
-int16_t pOff = 675; // 3bar
+int16_t pOn;
+int16_t pOff;
 uint8_t pNew, pIndex;
-uint8_t flow;
 uint8_t isNewPres;
+
+// flow sensor
+uint8_t flow;
+uint16_t tNoFlow, noFlowTimeout;
 
 // regulator
 uint8_t regOn;
 uint16_t tReg, tOn, t4ms;
-uint16_t vfdStopDelay = 750; // 3s
+uint16_t vfdStopDelay;
 
 // keyboard
 uint8_t key, lastKey, keyFirst;
@@ -208,7 +250,7 @@ uint16_t temp, current, voltage;
 uint16_t minVolt;
 uint16_t maxVolt;
 uint16_t maxCur;
-uint16_t maxTemp = 65535; // ???
+uint16_t maxTemp;
 uint16_t tVoltCalc;
 
 // faults
@@ -216,7 +258,8 @@ uint16_t fault, scFault;
 uint16_t tPresFault, tUv, tOv, tTemp;
 
 // Modbus
-uint8_t modbusReq[8], modbusReqI;
+uint8_t mbId, mbReqI, mbIgnore, mbResp, mbRespI, mbRegHi;
+uint16_t mbStart, mbQuant, mbRegI, mbCrc, crc, mbWord, lastCrc;
 uint16_t tModbus;
 
 // status pages
@@ -230,23 +273,32 @@ struct sPageDef {
 
 #define N_PAGE (sizeof(pageDef)/sizeof(pageDef[0]))
 #define PAGE_FIRST_FAULT 2
-#define PAGE_LAST_FAULT 8
+#define PAGE_LAST_FAULT 9
 const struct sPageDef pageDef[] = {
 	{ PAGE_STATUS, "", 0 },
 	{ PAGE_STATUS, "", 0 },
 	
-	{ PAGE_FAULT, "Short circuit", 0 },
-	{ PAGE_FAULT, "Pressure sensor", 0 },
-	{ PAGE_FAULT, "Low voltage", 0 },
-	{ PAGE_FAULT, "High voltage", 0 },
+	{ PAGE_FAULT, "Short Circuit", 0 },
+	{ PAGE_FAULT, "Pressure Sensor", 0 },
+	{ PAGE_FAULT, "Low Voltage", 0 },
+	{ PAGE_FAULT, "High Voltage", 0 },
 	{ PAGE_FAULT, "Overcurrent", 0 },
 	{ PAGE_FAULT, "Xtal Oscillator", 0 },
 	{ PAGE_FAULT, "IGBT Temperature", 0 },
+	{ PAGE_FAULT, "No Flow Timeout", 0 },
 	
+// values for debugging purposes
 	{ PAGE_INT, "clockWait", &clockWait },
 	{ PAGE_HEX16, "startTCWD", &startTCWD },
 	{ PAGE_HEX16, "startTCSRWD", &startTCSRWD },
 	{ PAGE_INT, "freqToPwm", &freqToPwm },
+	{ PAGE_INT, "tNoFlow", &tNoFlow },
+	{ PAGE_HEX16, "lastCrc", &lastCrc },
+	{ PAGE_HEX16, "mbCrc", &mbCrc },
+	{ PAGE_HEX16, "mbStart", &mbStart },
+	{ PAGE_HEX16, "mbQuant", &mbQuant },
+	{ PAGE_HEX8, "mbReqI", (uint16_t *) &mbReqI },
+	{ PAGE_HEX8, "mbRespI", (uint16_t *) &mbRespI },
 	
 	{ PAGE_HEX16, "pLowWord", &pLowWord },
 	{ PAGE_HEX16, "pHighWord", &pHighWord },
@@ -271,38 +323,36 @@ const struct sPageDef pageDef[] = {
 
 };	
 
-void delay(uint32_t ticks) {
-	while (--ticks) ;
+void delay(uint16_t n) {
+	while (n--) ;
 }
 
-void setParam(uint8_t n) {
-	float r1;
+void delay500ns(uint16_t n) {
+	uint16_t start;
 	
-	switch (n) {
-	case 0: pOn = 364.71875 + 10.30594 * param[n]; break;
-	case 1: pOff = 364.71875 + 10.30594 * param[n]; break;
-	case 2: vfdStopDelay = param[n] * 250; break;
-	case 3: autoRunStart = param[n];
-	case 4: maxFreq = 4.096 * param[n]; break;
-	case 5: baseFreq = 4.096 * param[n]; break;
-	case 6: minFreq = 4.096 * param[n]; break;
-	case 7: stopFreq = 4.096 * param[n]; break;
-	case 8: manualFreq = 4.096 * param[n]; break;
-	case 9:
-	case 10: freqToVolt = (float) param[n] / param[n - 1]; break;
-	case 11: maxCur = 7.7824 * param[n]; break;
-	case 12: minVolt = (float) param[n] * 2816 / 1395; break;
-	case 13: maxVolt = (float) param[n] * 2816 / 1395; break;
-	case 14: 
-		r1 = TEMP_R0 * expf(TEMP_B * ((1 / ((float) param[n] + TEMP_K) - 1 / TEMP_0)));
-		maxTemp = TEMP_RDIV / (r1 + TEMP_RDIV) * 1024;
-		break;
-	case 15: rotDirParam = param[n]; break;
-	case 16: extSwConfig = param[n]; break;
-	case 17: ignFaults = param[n]; break;
-	case 18: ledIntensity = 0xff >> (param[n] - 1); break;
-	}
+	start = TZ1.TCNT;
+	while (TZ1.TCNT - start < n) ;
 }
+
+int clockSetup() {
+	
+	CKCSR.BIT.PMRC = 3;
+	//CKCSR.BIT.OSCBAKE = 1;
+	CKCSR.BIT.CKSWIF = 0;
+	//CKCSR.BIT.CKSWIE = 1;
+	CKCSR.BIT.OSCSEL = 1;
+	while (!CKCSR.BIT.CKSTA) {
+		if (--clockWait == 0) {
+			fault |= FAULT_XTAL;
+			return 1;
+		}
+	}
+	return 0;		
+}
+
+/* ********************************* */
+/* ** LCD functions **************** */
+/* ********************************* */
 
 // printf is too slow
 void writeNum(char out[], uint16_t num, uint8_t nI, uint8_t nF) {
@@ -329,6 +379,104 @@ void writeNum(char out[], uint16_t num, uint8_t nI, uint8_t nF) {
 	}
 }
 
+void lcdSend(uint8_t data, uint8_t rs) {
+	IO.PDR3.BYTE = data;
+	IO.PDR1.BIT.B6 = rs; // min 40ns
+	
+	IO.PDR1.BIT.B7 = 1;
+	IO.PDR1.BIT.B7 = 1;
+	IO.PDR1.BIT.B7 = 1;
+	IO.PDR1.BIT.B7 = 1; // min 230ns
+	
+	IO.PDR1.BIT.B7 = 0; // min 37us
+	tLcdSend = TZ1.TCNT;
+}
+
+void lcdInit() {
+	uint8_t i;
+	
+	WDT.TCWD = 0;
+	delay500ns(40000);
+	delay500ns(40000); // min 40ms after Vcc>2.7V
+	WDT.TCWD = 0;
+	lcdSend(0x30, 0);
+	delay500ns(8200); // min 4.1ms
+	lcdSend(0x30, 0);
+	delay500ns(200); // min 100us
+	lcdSend(0x30, 0);
+	delay500ns(90); // min 37us
+	lcdSend(0x38, 0);	// function set
+	delay500ns(90); // min 37us
+	lcdSend(0x0c, 0);	// display on
+	delay500ns(90); // min 37us
+	lcdSend(0x01, 0);  // clear display
+	delay500ns(6000); // min 1.53ms
+	
+	lcdSend(0x48, 0); // degree symbol
+	delay500ns(90); // min 37us
+	for (i = 0; i < 8; i++) {
+		lcdSend(degreeSymbol[i], 1);
+		delay500ns(90); // min 37us
+	}
+
+	lcdSend(0x50, 0); // arrow up symbol
+	delay500ns(90); // min 37us
+	for (i = 0; i < 8; i++) {
+		lcdSend(arrowSymbol[i], 1);
+		delay500ns(90); // min 37us
+	}
+}
+
+void lcdProc() {
+	uint8_t row, col;
+	
+	if (TZ1.TCNT - tLcdSend < 90) return;
+	
+	row = (lcdPos >> 6) & 1;
+	if (lcdProcRun) {
+		col = lcdPos & 0x3f;
+		lcdSend(lcdLine[row][col], 1);
+		lcdPos++;
+		if (col == 15) lcdProcRun = 0;
+	} else {
+		row ^= 1;
+		if (lcdRefresh & (1 << row)) {
+			lcdRefresh &= ~(1 << row);
+			lcdPos = row << 6;
+			lcdProcRun = 1;
+			lcdSend(0x80 | lcdPos, 0);
+		}
+	}
+}		
+
+void lcdPrintln(uint8_t row, char data[]) {
+	uint8_t i, j;
+
+	if (row > 1) return;
+	j = 0;
+	for (i = 0; i < 16; i++) {
+		if (data[j] != 0)
+			lcdLine[row][i] = data[j++];
+		else
+			lcdLine[row][i] = 0x20;
+	}
+	lcdRefresh |= 1 << row;
+}
+
+void lcdPrintf(uint8_t row, const char *format, ...) {
+	va_list args;
+	char buf[30];
+
+	va_start(args, format);
+	vsprintf(buf, format, args);
+	lcdPrintln(row, buf);
+	va_end(args);
+}
+
+/* ********************************* */
+/* ** Serial port functions ******** */
+/* ********************************* */
+
 void serialSend(uint8_t byte) {
 	uint16_t timeout;
 	
@@ -340,7 +488,7 @@ void serialSend(uint8_t byte) {
 // for debugging
 void serialPrintf(const char *format, ...) {
 	va_list args;
-	uint8_t i, j;
+	uint8_t i;
 
 	va_start(args, format);
 	vsprintf(serialData, format, args);
@@ -349,6 +497,41 @@ void serialPrintf(const char *format, ...) {
 		serialSend(serialData[i]);
 	}
 	va_end(args);
+}
+
+/* ********************************* */
+/* ** EEPROM functions ************* */
+/* ********************************* */
+
+void setParam(uint8_t n) {
+	float r1;
+	
+	switch (n) {
+	case 0: pOn = 364.71875f + 10.30594f * param[n]; break;
+	case 1: pOff = 364.71875f + 10.30594f * param[n]; break;
+	case 2: vfdStopDelay = param[n] * 250; break;
+	case 3: autoRunStart = param[n];
+	case 4: maxFreq = 4.096f * param[n]; break;
+	case 5: baseFreq = 4.096f * param[n]; break;
+	case 6: minFreq = 4.096f * param[n]; break;
+	case 7: stopFreq = 4.096f * param[n]; break;
+	case 8: manualFreq = 4.096f * param[n]; break;
+	case 9:
+	case 10: freqToVolt = (float) param[n] / param[n - 1]; break;
+	case 11: maxCur = 7.7824f * param[n]; break;
+	case 12: minVolt = (float) param[n] * 2816 / 1395; break;
+	case 13: maxVolt = (float) param[n] * 2816 / 1395; break;
+	case 14: 
+		r1 = TEMP_R0 * expf(TEMP_B * ((1 / ((float) param[n] + TEMP_K) - 1 / TEMP_0)));
+		maxTemp = TEMP_RDIV / (r1 + TEMP_RDIV) * 1024;
+		break;
+	case 15: noFlowTimeout = param[n] / 0.032768f;
+	case 16: rotDirParam = param[n]; break;
+	case 17: extSwConfig = param[n]; break;
+	case 18: ignFaults = param[n]; break;
+	case 19: ledIntensity = 0xff >> (param[n] - 1); break;
+	case 20: mbId = param[n]; break;
+	}
 }
 
 uint8_t spiCmd(uint32_t data, uint8_t out, uint8_t in) {
@@ -442,6 +625,10 @@ repairEeprom:
 	eepWrite((uint8_t *) eepSign, 0, 8);
 }
 
+/* ********************************* */
+/* ** Keypad functions ************* */
+/* ********************************* */
+
 uint8_t getKey() {
 	uint8_t key, p7, p5b2;
 	
@@ -493,81 +680,13 @@ uint8_t readKey() {
 	}
 }
 
-void lcdSend(uint8_t data, uint8_t rs) {
-	IO.PDR3.BYTE = data;
-	IO.PDR1.BIT.B6 = rs;
-	delay(50); // min 60ns
-	IO.PDR1.BIT.B7 = 1;
-	delay(10); // min 450ns
-	IO.PDR1.BIT.B7 = 0;
-	delay(50); // min 37us
-}
-
-void lcdInit() {
-	uint8_t i;
-	
-	delay(150000); // min 40ms after Vcc>2.7V
-	lcdSend(0x30, 0);
-	delay(15000); // min 4.1ms
-	lcdSend(0x30, 0);
-	delay(500); // min 100us
-	lcdSend(0x30, 0);
-	delay(500); // min 37us
-	lcdSend(0x38, 0);	// function set
-	delay(500); // min 37us
-	lcdSend(0x0c, 0);	// display on
-	delay(500); // min 37us
-	lcdSend(0x01, 0);  // clear display
-	delay(5000);
-	lcdSend(0x48, 0); // degree symbol
-	for (i = 0; i < 8; i++)
-		lcdSend(degreeSymbol[i], 1);
-	lcdSend(0x50, 0); // arrow up symbol
-	for (i = 0; i < 8; i++)
-		lcdSend(arrowSymbol[i], 1);
-}
-
-void lcdSendLine(uint8_t line, char data[]) {
-	uint8_t i, j;
-	uint8_t rowOffset[] = { 0, 0x40 };
-
-	lcdSend(rowOffset[line] | 0x80, 0);
-	j = 0;
-	for (i = 0; i < 16; i++) {
-		if (data[j] != 0) {
-			lcdSend((uint8_t) data[j++], 1);
-		} else {
-			lcdSend(0x20, 1);
-		}
-	}
-}
-
-void lcdPrintf(uint8_t line, const char *format, ...) {
-	va_list args;
-
-	va_start(args, format);
-	vsprintf(lcdLine[line], format, args);
-	lcdSendLine(line, lcdLine[line]);
-	va_end(args);
-}
-
-int clockSetup() {
-	
-	CKCSR.BIT.PMRC = 3;
-	//CKCSR.BIT.OSCBAKE = 1;
-	CKCSR.BIT.CKSWIF = 0;
-	//CKCSR.BIT.CKSWIE = 1;
-	CKCSR.BIT.OSCSEL = 1;
-	while (!CKCSR.BIT.CKSTA) {
-		if (--clockWait == 0) {
-			fault |= FAULT_XTAL;
-			return 1;
-		}
-	}
-	return 0;		
-}
+/* ********************************* */
+/* ** VFD functions **************** */
+/* ********************************* */
 
 void startVfd() {
+	if (vfdRun) return;
+	rotDir = rotDirParam;
 	freq = 0;
 	pwmRatio = 0;
 	TZ0.GRB = PWM_MAX / 2;
@@ -615,6 +734,27 @@ void regVfd() {
 	reqFreq = tmp;
 }
 
+void voltCalc() {
+	uint16_t tmp;
+	float voltNow;
+	
+	if (voltage < minVolt || voltage > maxVolt) return;
+	voltNow = (float) voltage * (1395.0f / 2816.0f / 1.414214f);
+	tmp = freqToVolt / voltNow * (252.0f * 62.5f / 4.0f);
+	if (tmp > 255) tmp = 255;
+	if (freqToPwm == 0)
+		freqToPwm = tmp;
+	else if (tmp > freqToPwm)
+		freqToPwm++;
+	else if (tmp < freqToPwm)
+		freqToPwm--;
+	tVoltCalc = t4ms;
+}
+
+/* ********************************* */
+/* ** Signal input functions ******* */
+/* ********************************* */
+
 void adcProc() {
 	uint8_t adcsr, chan;
 	
@@ -623,6 +763,9 @@ void adcProc() {
 		chan = adcsr & 7;
 		switch (chan) {
 			case 3:
+				flow = !IO.PDRB.BIT.B2;
+				if (flow || !vfdRun) tNoFlow = z1highWord;
+
 				adcVal[0] += AD.ADDRD >> 6;
 				adcCnt[0]++;
 				if (adcCnt[0] == 0x40) {
@@ -655,7 +798,6 @@ void adcProc() {
 			default:
 				chan = 3;
 		}
-		flow = !IO.PDRB.BIT.B2;
 		AD.ADCSR.BYTE = chan;
 		AD.ADCSR.BYTE = chan | 0x20;
 	} else if (!(adcsr & 0x20)) {
@@ -699,7 +841,15 @@ uint8_t newPressure() {
 	return 1;
 }
 
+/* ********************************* */
+/* ** User interface functions ***** */
+/* ********************************* */
+
 void checkFaults() {
+	if (!autoRun && !manualRun) {
+		fault &= ~(FAULT_OC | FAULT_NO_FLOW);
+	}
+
 	if (t4ms - tPres > 50) {
 		fault |= FAULT_PRESSURE;
 		stopVfd();
@@ -736,6 +886,10 @@ void checkFaults() {
 		fault |= FAULT_XTAL;
 		stopVfd();
 	}
+	if (z1highWord - tNoFlow > noFlowTimeout) {
+		fault |= FAULT_NO_FLOW;
+		stopVfd();
+	}
 }
 
 void dispProc() {
@@ -745,15 +899,15 @@ void dispProc() {
 	switch (dispStep++) {
 	case 0:
 		IO.PDR8.BIT.B5 = 1;
-		dispFreq = (float) freq * 62.5 / 256 + 0.5;
+		dispFreq = (float) freq * (62.5f / 256.0f) + 0.5;
 		writeNum(&statusLine[0][9], dispFreq, 2, 0);
 		break;
 	case 1:
-		dispVolt = (float) voltage * (1395 / 2816);
+		dispVolt = (float) voltage * (1395.0f / 2816.0f);
 		writeNum(&statusLine[1][1], dispVolt, 3, 0);
 		break;
 	case 2:
-		dispCur = (float) current * (1250 / 9728);
+		dispCur = (float) current * (1250.0f / 9728.0f);
 		writeNum(&statusLine[1][6], dispCur, 1, 1);
 		break;
 	case 3:
@@ -762,7 +916,7 @@ void dispProc() {
 			statusLine[0][1] = '-';
 			statusLine[0][2] = ' ';
 		} else {
-			dispPres = (float) (pAct - 364) * 0.09703136;
+			dispPres = (float) (pAct - 364) * 0.09703136f;
 			writeNum(&statusLine[0][0], dispPres, 1, 1);
 		}
 		statusLine[0][7] = flow ? 0x02 : 0x20;
@@ -785,15 +939,15 @@ void dispProc() {
 		}
 		break;
 	case 6:
-		dispPow = (float) voltage * (float) current * (1395 / 2816 * 1250 / 9728 / 10);
+		dispPow = (float) voltage * (float) current * (1395.0f / 2816.0f * 1250.0f / 9728.0f / 10.0f);
 		writeNum(&statusLine[2][1], dispPow, 4, 0);
 
-		if ((pageDef[page].type == PAGE_FAULT) &&
+/*		if ((pageDef[page].type == PAGE_FAULT) &&
 			!(((fault | scFault) >> (page - PAGE_FIRST_FAULT)) & 1)) {
 			for (page = PAGE_FIRST_FAULT; page <= PAGE_LAST_FAULT; page++)
 				if (((fault | scFault) >> (page - PAGE_FIRST_FAULT)) & 1) break;
 			if (page > PAGE_LAST_FAULT) page = 0;
-		}
+		}*/
 		if (pageDef[page].type == PAGE_INT) {
 			writeNum(&statusLine[3][3], *pageDef[page].ptr, 5, 0);
 			statusLine[3][8] = ' ';
@@ -824,37 +978,31 @@ void dispProc() {
 	case 7:
 		if (!menu) {
 			if (page < PAGE_FIRST_FAULT) {
-				lcdSendLine(0, statusLine[0]);
+				lcdPrintln(0, statusLine[0]);
 			} else if (page <= PAGE_LAST_FAULT) {
-				lcdSendLine(0, "FAULT:");
+				if ((pageDef[page].type == PAGE_FAULT) &&
+					!(((fault | scFault) >> (page - PAGE_FIRST_FAULT)) & 1)) {
+					lcdPrintln(0, "FAULT (interm.):");
+				} else {
+					lcdPrintln(0, "FAULT:");
+				}
 			} else {
-				lcdSendLine(0, pageDef[page].name);
+				lcdPrintln(0, pageDef[page].name);
 			}
 		}
 		break;
 	default:
 		if (!menu) {
-			if (page == 0) lcdSendLine(1, statusLine[1]);
-			else if (page == 1) lcdSendLine(1, statusLine[2]);
-			else if (page <= PAGE_LAST_FAULT) lcdSendLine(1, pageDef[page].name);
-			else lcdSendLine(1, statusLine[3]);
+			if (page == 0) lcdPrintln(1, statusLine[1]);
+			else if (page == 1) lcdPrintln(1, statusLine[2]);
+			else if (page <= PAGE_LAST_FAULT) lcdPrintln(1, pageDef[page].name);
+			else lcdPrintln(1, statusLine[3]);
 		}
 		dispStep = 0;
 	}
 	tDisp = t4ms;
 	IO.PDR8.BIT.B6 = 0;
 	IO.PDR8.BIT.B5 = 0;
-}
-
-void voltCalc() {
-	uint16_t tmp;
-	float voltNow;
-	
-	if (voltage < minVolt || voltage > maxVolt) return;
-	voltNow = (float) voltage * 1395 / 2816 / 1.414214;
-	tmp = freqToVolt / voltNow * 252 * 62.5 / 4;
-	if (tmp > 255) tmp = 255;
-	freqToPwm = tmp;
 }
 
 void writeMenuLine() {
@@ -890,7 +1038,7 @@ void menuProc() {
 				page--;
 				if (pageDef[page].type == PAGE_FAULT) {
 					while ((page >= PAGE_FIRST_FAULT) &&
-						!((fault | scFault) >> (page - PAGE_FIRST_FAULT)) & 1) page--;
+						!((fault | scFault) >> (page - PAGE_FIRST_FAULT) & 1)) page--;
 				}
 			}
 			break;
@@ -910,7 +1058,7 @@ void menuProc() {
 				page++;
 				if (pageDef[page].type == PAGE_FAULT) {
 					while ((page <= PAGE_LAST_FAULT) &&
-						!((fault | scFault) >> (page - PAGE_FIRST_FAULT)) & 1) page++;
+						!((fault | scFault) >> (page - PAGE_FIRST_FAULT) & 1)) page++;
 				}
 			}
 			break;
@@ -948,64 +1096,168 @@ void menuProc() {
 	case 0:
 		break;
 	case 1:
-		lcdSendLine(0, paramDef[menuItem].name);
+		lcdPrintln(0, paramDef[menuItem].name);
 		writeMenuLine();
 		menuLine[9] = ' ';
-		lcdSendLine(1, menuLine);
+		lcdPrintln(1, menuLine);
 		break;
 	case 2:
-		lcdSendLine(0, paramDef[menuItem].name);
+		lcdPrintln(0, paramDef[menuItem].name);
 		writeMenuLine();
 		menuLine[9] = '>';
-		lcdSendLine(1, menuLine);
+		lcdPrintln(1, menuLine);
 		break;
 	}
 }
 
-void modbusProc() {
-	if (t4ms - tModbus > 2) modbusReqI = 0;
-	if (SCI3.SSR.BIT.RDRF) {
-		modbusReq[modbusReqI++] = SCI3.RDR;
-		SCI3.SSR.BIT.RDRF = 0;
-		tModbus = t4ms;
-	}
-	if (modbusReqI == 8) modbusReqI = 0;
-}
-	
 void setLeds() {
 	tLed++;
 	
 	switch (tLed & ledIntensity) {
-	case 0: 
-		IO.PDR7.BIT.B5 = 0;
-		IO.PDR7.BIT.B6 = 1;
-		break;
-	case 1:
-		IO.PDR7.BIT.B6 = 0;
-		IO.PDR7.BIT.B4 = autoRun ? 1 : 0;
-		break;
-	case 2:
-		IO.PDR7.BIT.B4 = 0;
-		IO.PDR7.BIT.B2 = vfdRun ? 1 : 0;
-		break;
-	case 3:
-		IO.PDR7.BIT.B2 = 0;
+	case 0: IO.PDR7.BIT.B6 = 1; break;
+	case 1:	IO.PDR7.BIT.B6 = 0; break;
+	case 2:	IO.PDR7.BIT.B4 = autoRun ? 1 : 0; break;
+	case 3:	IO.PDR7.BIT.B4 = 0;	break;
+	case 4:	IO.PDR7.BIT.B2 = vfdRun ? 1 : 0; break;
+	case 5: IO.PDR7.BIT.B2 = 0;	break;
+	case 6:
 		if (ignFaults)
 			IO.PDR7.BIT.B5 = ((t4ms & 0xf0) == 0) ? 1 : 0;
 		else
 			IO.PDR7.BIT.B5 = (fault | scFault) ? 1 : 0;
 		break;
-	case 4:
-		IO.PDR7.BIT.B5 = 0;
-		break;
+	case 7:	IO.PDR7.BIT.B5 = 0;	break;
 	}
 }
 
+/* ********************************* */
+/* ** Modbus interface functions *** */
+/* ********************************* */
+
+void calcCrc(uint8_t byte) {
+	uint8_t tmp;
+	
+	tmp = crc ^ byte;
+	crc >>= 8;
+	crc ^= crcTable[tmp];
+}
+
+int16_t mbGetReg(uint16_t reg) {
+	switch (reg) {
+	case 0: return mbId;
+	case 10: return dispPres;
+	case 11: return flow;
+	case 12: return dispVolt;
+	case 13: return dispCur;
+	case 14: return dispPow;
+	case 15: return dispFreq;
+	case 16: return dispTemp;
+	case 17: return fault | scFault;
+	case 18: return vfdRun;
+	default: return 0;
+	}
+}
+
+void mbProc() {
+	uint16_t tz1now;
+	uint8_t byte;
+	
+	tz1now = TZ1.TCNT;
+	if ((tz1now - tModbus > 7292) && !mbResp) {
+		mbReqI = 0;
+		mbIgnore = 0;
+		crc = 0xffff;
+	}
+	if (SCI3.SSR.BIT.RDRF && !mbResp) {
+		if (mbIgnore)
+			SCI3.RDR;
+		else {
+			byte = SCI3.RDR;
+			if (mbReqI < 6) calcCrc(byte);
+			switch (mbReqI) {
+			case 0: if (byte != mbId) mbIgnore = 1; break;
+			case 1: if (byte != 0x03) mbIgnore = 1; break;
+			case 2: mbStart = byte << 8; break;
+			case 3: mbStart |= byte; break;
+			case 4: mbQuant = byte << 8; break;
+			case 5: mbQuant |= byte; break;
+			case 6: mbCrc = byte; break;
+			case 7:
+				mbCrc |= (uint16_t) byte << 8;
+				lastCrc = crc;
+				if (mbCrc == crc && mbQuant <= 125) {
+					mbResp = 1;
+					mbRespI = 0;
+					crc = 0xffff;
+				}
+				break;
+			default: mbIgnore = 1;
+			}
+			mbReqI++;
+		}
+		tModbus = tz1now;
+	}
+	if (mbResp && SCI3.SSR.BIT.TDRE) {
+		SCI3.RDR;
+		switch (mbRespI) {
+		case 0: 
+			if (tz1now - tModbus > 7292) {
+				calcCrc(mbId);
+				SCI3.TDR = mbId;
+				mbRespI++;
+			}
+			break;
+		case 1:
+			calcCrc(0x03);
+			SCI3.TDR = 0x03;
+			mbRespI++;
+			break;
+		case 2:
+			byte = mbQuant * 2;
+			calcCrc(byte);
+			SCI3.TDR = byte;
+			mbRegI = 0;
+			mbRegHi = 1;
+			mbRespI++;
+			break;
+		case 3:
+			if (mbRegI < mbQuant) {
+				if (mbRegHi) {
+					mbWord = mbGetReg(mbStart + mbRegI);
+					byte = mbWord >> 8;
+					calcCrc(byte);
+					SCI3.TDR = byte;
+					mbRegHi = 0;
+				} else {
+					byte = mbWord;
+					calcCrc(byte);
+					SCI3.TDR = byte;
+					mbRegHi = 1;
+					mbRegI++;
+				}
+			} else {
+				if (mbRegHi) {
+					SCI3.TDR = crc & 0xff;
+					mbRegHi = 0;
+				} else {
+					SCI3.TDR = crc >> 8;
+					mbRespI++;
+					tModbus = tz1now;
+				}
+			}
+			break;
+		default:
+			if (tz1now - tModbus < 7292) {
+				SCI3.RDR;
+			} else {
+				mbResp = 0;
+			}
+		}
+	}
+}
+	
 void main(void)
 {
-	uint8_t i, j, buf;
-	uint16_t tSerial;
-	
 	startTCWD = WDT.TCWD;
 	startTCSRWD = WDT.TCSRWD.BYTE;
 	WDT.TCSRWD.BYTE = 0x54; // disable watchdog
@@ -1052,40 +1304,42 @@ void main(void)
 
 	WDT.TCWD = 0;
 
-	lcdPrintf(0, "Wilo EMHIL505EM");
-	lcdPrintf(1, " open firmware");
-
-	WDT.TCWD = 0;
+	lcdPrintln(0, "Wilo EMHIL505EM");
+	lcdPrintln(1, " open firmware");
 
 	tDisp = t4ms;
 	loadEeprom();
 
-	while (t4ms - tDisp < 250) WDT.TCWD = 0;
+	while (t4ms - tDisp < 250) {
+		lcdProc();
+		WDT.TCWD = 0;
+	}
 	IO.PDR1.BIT.B1 = 1; // switch on relay
-	lcdPrintf(0, " Jakub Strnad");
-	lcdPrintf(1, " v0.9 02/2025");
+	lcdPrintln(0, " Jakub Strnad");
+	lcdPrintln(1, " v0.9 02/2025");
 	tDisp = t4ms;
 	while (t4ms - tDisp < 250) {
 		newPressure();
 		adcProc();
+		lcdProc();
 		WDT.TCWD = 0;
 	}
+	
+	voltCalc();
 
 	autoRun = autoRunStart;
 	
 	while (1) {
+		isNewPres = pNew ? newPressure() : 0;
 		adcProc();
+
 		if (ignFaults) {
 			fault = 0;
 		} else {
 			checkFaults();
 		}
-		if (!vfdRun && (t4ms - tVoltCalc > 25)) {
-			voltCalc();
-			rotDir = rotDirParam;
-		}
-		
-		isNewPres = pNew ? newPressure() : 0;
+
+		if (t4ms - tVoltCalc > 250) voltCalc();
 
 		if (manualRun) {
 			reqFreq = manualFreq;
@@ -1099,9 +1353,10 @@ void main(void)
 		else if (vfdRun && (reqFreq <= stopFreq) && (freq <= stopFreq)) stopVfd();
 
 		setLeds();
-		if (t4ms - tDisp > 10) dispProc();
-		if (key = readKey()) menuProc();
-		modbusProc();
+		if (t4ms - tDisp > 4) dispProc();
+		if ((tLed & 1) && (key = readKey())) menuProc();
+		lcdProc();
+		mbProc();
 
 		WDT.TCWD = 0;
 	}
@@ -1174,9 +1429,7 @@ __interrupt(vect=25) void INT_ADI(void) {/* sleep(); */}
 
 //  vector 26 Timer Z0
 __interrupt(vect=26) void INT_TimerZ0(void) { //irqZ0(); }
-	uint8_t int4ms;
-	
-	IO.PDR8.BIT.B7 = 1;
+//	IO.PDR8.BIT.B7 = 1; // duration measurement
 
 	if (TZ0.TSR.BIT.IMFA) {
 		TZ0.TSR.BIT.IMFA = 0;
@@ -1210,7 +1463,8 @@ __interrupt(vect=26) void INT_TimerZ0(void) { //irqZ0(); }
 		TZ0.TSR.BIT.IMFB = 0;
 		TZ0.GRB = ((int16_t) svpwmW[svpwmIndex] * pwmRatio >> 5) + PWM_MAX / 2;
 	}
-	IO.PDR8.BIT.B7 = 0;
+	
+//	IO.PDR8.BIT.B7 = 0;
 }
 
 //  vector 27 Timer Z1
