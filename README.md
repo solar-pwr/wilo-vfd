@@ -17,10 +17,11 @@ Open Source Firmware for Wilo EMHIL 505 EM water pump
 - **Rated frequency:** rated frequency of the motor (like 50Hz or 60Hz), used for output V/f ratio calculation
 - **Rated voltage:** rated voltage of the motor (effective value, like 230V), used for output V/f ratio calculation;
   HINT: you can decrease this to reduce the power consumption, in my case, 130V works pretty well
-- **Max current:** current from the DC rail; if this value is exceeded, permanent fault is set
-- **Undervoltage:** minimum voltage on the DC rail; if voltage drops below this value, temporary fault is set; automatically resets in 4 seconds
-- **Overvoltage:** maximum voltage on the DC rail; if voltage exceeds this value, temporary fault is set; automatically resets in 4 seconds
-- **Max temperature:** maximum temperature of the IGBT module; if temperature exceeds this value, temporary fault is set; automatically resets in 4 seconds
+- **Max current:** current from the DC rail; if this value is exceeded, fault is set, resets when both auto and manual run is disabled
+- **Undervoltage:** minimum voltage on the DC rail; if voltage drops below this value, temporary fault is set, automatically resets in 4 seconds
+- **Overvoltage:** maximum voltage on the DC rail; if voltage exceeds this value, temporary fault is set, automatically resets in 4 seconds
+- **Max temperature:** maximum temperature of the IGBT module; if temperature exceeds this value, temporary fault is set, automatically resets in 4 seconds
+- **No flow timeout:** maximum time the pump can continuously run without detecting water flow; fault resets when both auto and manual run is disabled
 - **Rotation dir.:** 0 = "original" rotation direction; 1 = the opposite
 - **External switch:** 0 = disabled; 1 = autorun when closed; 2 = autorun when open
 - **Ignore faults:** disable fault detection, except short-circuit fault from IGBT module
