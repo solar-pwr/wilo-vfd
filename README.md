@@ -15,7 +15,7 @@ Open Source Firmware for Wilo EMHIL 505 EM water pump
 - **Stop frequency:** below this frequency, PWM is turned off and output phases are shorted to the negative pole
 - **Manual frequency:** frequency preset for manual run mode
 - **Rated frequency:** rated frequency of the motor (like 50Hz or 60Hz), used for output V/f ratio calculation
-- **Rated voltage:** rated voltage of the motor (effective value, like 230V), used for output V/f ratio calculation;
+- **Rated voltage:** rated RMS voltage of the motor (like 230V), used for output V/f ratio calculation;
   HINT: you can decrease this to reduce the power consumption, in my case, 130V works pretty well
 - **Max current:** current from the DC rail; if this value is exceeded, fault is set, resets when both auto and manual run is disabled
 - **Undervoltage:** minimum voltage on the DC rail; if voltage drops below this value, temporary fault is set, automatically resets in 4 seconds
