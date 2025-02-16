@@ -895,10 +895,10 @@ void checkFaults() {
 void dispProc() {
 	uint16_t pageVal;
 	
-	IO.PDR8.BIT.B6 = 1;
+	IO.PDR8.BIT.B6 = 1; // duration measurement
 	switch (dispStep++) {
 	case 0:
-		IO.PDR8.BIT.B5 = 1;
+		IO.PDR8.BIT.B5 = 1; // duration measurement
 		dispFreq = (float) freq * (62.5f / 256.0f) + 0.5;
 		writeNum(&statusLine[0][9], dispFreq, 2, 0);
 		break;
@@ -1001,8 +1001,8 @@ void dispProc() {
 		dispStep = 0;
 	}
 	tDisp = t4ms;
-	IO.PDR8.BIT.B6 = 0;
-	IO.PDR8.BIT.B5 = 0;
+	IO.PDR8.BIT.B6 = 0; // duration measurement
+	IO.PDR8.BIT.B5 = 0; // duration measurement
 }
 
 void writeMenuLine() {
@@ -1258,9 +1258,9 @@ void mbProc() {
 	
 void main(void)
 {
-	startTCWD = WDT.TCWD;
-	startTCSRWD = WDT.TCSRWD.BYTE;
-	WDT.TCSRWD.BYTE = 0x54; // disable watchdog
+	startTCWD = WDT.TCWD; // for debugging only
+	startTCSRWD = WDT.TCSRWD.BYTE; // for debugging only
+	WDT.TCSRWD.BYTE = 0x54; // enable watchdog registers write access
 	WDT.TCSRWD.BYTE = 0x54;
 	WDT.TCWD = 0; // watchdog reset
 
