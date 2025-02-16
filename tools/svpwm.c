@@ -1,3 +1,5 @@
+// this code generates the arrays with space-vector PWM waveforms
+
 #include <stdio.h>
 #include <math.h>
 
